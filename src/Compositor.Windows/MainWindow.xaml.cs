@@ -1438,6 +1438,21 @@ public sealed partial class MainWindow : Window
             return CreateAiLayerSnapshot(group);
         }
 
+        if (method == "canvas.crop")
+        {
+            EnsureAiProject();
+            var x = RequiredDouble(request.Parameters, "x");
+            var y = RequiredDouble(request.Parameters, "y");
+            var width = RequiredDouble(request.Parameters, "width");
+            var height = RequiredDouble(request.Parameters, "height");
+
+            _session.CropCanvas(x, y, width, height);
+            _selectionRect = null;
+            MarkModified();
+            await RefreshDocumentAsync(fit: true);
+            return CreateAiDocumentSnapshot();
+        }
+
         if (method == "history.undo")
         {
             EnsureAiProject();
