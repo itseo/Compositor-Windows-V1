@@ -91,6 +91,18 @@ public static class CompositorTools
         CancellationToken cancellationToken = default)
         => BridgeClient.CallAsync("group.add", new { name }, cancellationToken);
 
+    [McpServerTool, Description("Crops the active canvas to document-pixel bounds. The operation is undoable and shifts all layer transforms with the new canvas origin.")]
+    public static Task<string> CropCanvas(
+        double x,
+        double y,
+        double width,
+        double height,
+        CancellationToken cancellationToken = default)
+        => BridgeClient.CallAsync(
+            "canvas.crop",
+            new { x, y, width, height },
+            cancellationToken);
+
     [McpServerTool, Description("Undoes the most recent editable operation in Compositor.")]
     public static Task<string> Undo(CancellationToken cancellationToken)
         => BridgeClient.CallAsync("history.undo", cancellationToken: cancellationToken);
