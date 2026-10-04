@@ -18,6 +18,13 @@ public static class ManifestCloner
             ?? throw new InvalidOperationException("Could not clone the document manifest.");
     }
 
+    public static CompLayer CloneLayer(CompLayer layer)
+    {
+        var json = JsonSerializer.Serialize(layer, Options);
+        return JsonSerializer.Deserialize<CompLayer>(json, Options)
+            ?? throw new InvalidOperationException("Could not clone the layer.");
+    }
+
     public static bool Equivalent(CompManifest left, CompManifest right)
         => JsonSerializer.Serialize(left, Options) == JsonSerializer.Serialize(right, Options);
 }
