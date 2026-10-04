@@ -100,6 +100,27 @@
                        TextTrimming="CharacterEllipsis" />
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                <ComboBox x:Name="CropRatioBox"
+                          Width="92"
+                          Visibility="Collapsed"
+                          SelectedIndex="0"
+                          SelectionChanged="CropRatioBox_SelectionChanged">
+                    <ComboBoxItem Content="Free" Tag="0" />
+                    <ComboBoxItem Content="1:1" Tag="1" />
+                    <ComboBoxItem Content="3:4" Tag="0.75" />
+                    <ComboBoxItem Content="4:5" Tag="0.8" />
+                    <ComboBoxItem Content="9:16" Tag="0.5625" />
+                    <ComboBoxItem Content="16:9" Tag="1.7777777778" />
+                </ComboBox>
+                <Button x:Name="ApplyCropButton"
+                        Content="Apply crop"
+                        Click="ApplyCrop_Click"
+                        Visibility="Collapsed"
+                        IsEnabled="False" />
+                <Button x:Name="ClearSelectionButton"
+                        Content="Clear"
+                        Click="ClearSelection_Click"
+                        Visibility="Collapsed" />
                 <Button x:Name="FlipHButton" Content="Flip H" Click="FlipHorizontal_Click" IsEnabled="False" />
                 <Button x:Name="FlipVButton" Content="Flip V" Click="FlipVertical_Click" IsEnabled="False" />
             </StackPanel>
@@ -123,18 +144,18 @@
                         <Button x:Name="MoveToolButton" Content="↖" Tag="Move"
                                 Width="40" Height="40" Click="ToolButton_Click"
                                 ToolTipService.ToolTip="Move (V)" />
-                        <Button Content="▭" Tag="Marquee" Width="40" Height="40"
-                                IsEnabled="False" Opacity="0.42"
-                                ToolTipService.ToolTip="Marquee — next milestone" />
+                        <Button x:Name="MarqueeToolButton" Content="▭" Tag="Marquee" Width="40" Height="40"
+                                Click="ToolButton_Click"
+                                ToolTipService.ToolTip="Rectangle Marquee (M)" />
                         <Button Content="⌁" Tag="Lasso" Width="40" Height="40"
                                 IsEnabled="False" Opacity="0.42"
                                 ToolTipService.ToolTip="Lasso — next milestone" />
                         <Button Content="✦" Tag="Wand" Width="40" Height="40"
                                 IsEnabled="False" Opacity="0.42"
                                 ToolTipService.ToolTip="Object / Wand — later milestone" />
-                        <Button Content="⌗" Tag="Crop" Width="40" Height="40"
-                                IsEnabled="False" Opacity="0.42"
-                                ToolTipService.ToolTip="Crop — next milestone" />
+                        <Button x:Name="CropToolButton" Content="⌗" Tag="Crop" Width="40" Height="40"
+                                Click="ToolButton_Click"
+                                ToolTipService.ToolTip="Crop (C)" />
                         <Border Height="1" Background="#3A3E42" Margin="5,3" />
                         <Button Content="B" Tag="Brush" Width="40" Height="40"
                                 IsEnabled="False" Opacity="0.42"
@@ -204,7 +225,10 @@
                                 <Canvas x:Name="ProjectCanvas"
                                         Background="Transparent"
                                         HorizontalAlignment="Left"
-                                        VerticalAlignment="Top" />
+                                        VerticalAlignment="Top"
+                                        PointerPressed="ProjectCanvas_PointerPressed"
+                                        PointerMoved="ProjectCanvas_PointerMoved"
+                                        PointerReleased="ProjectCanvas_PointerReleased" />
                             </Border>
                         </Viewbox>
                     </Grid>
