@@ -30,6 +30,9 @@ public sealed class CompProjectStore
             destinationPath += ".comp";
         }
 
+        // V0.2 writes the current schema while preserving extension metadata from newer
+        // features that this editor does not understand yet.
+        project.Manifest.Version = CompProjectLoader.SupportedManifestVersion;
         _loader.Validate(project);
 
         var parent = Path.GetDirectoryName(destinationPath)
