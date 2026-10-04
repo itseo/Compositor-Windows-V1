@@ -138,6 +138,39 @@ public sealed class EditorSession
     public void SetSelectedOpacity(double opacity)
         => Mutate("Change Layer Opacity", _ => SelectedLayer!.Opacity = Math.Clamp(opacity, 0, 1));
 
+    public void CropCanvas(double x, double y, double width, double height)
+    {
+        EnsureProject();
+
+        if (![x, y, width, height].All(double.IsFinite) ||
+            width < 1 ||
+            height < 1)
+        {
+            throw new ArgumentException("Crop bounds must be finite and at least one pixel.");
+        }
+
+        var manifest = Project!.Manifest;
+        var left = Math.Clamp(Math.Floor(x), 0, manifest.Width - 1);
+        var top = Math.Clamp(Math.Floor(y), 0, manifest.Height - 1);
+        var right = Math.Clamp(Math.Ceiling(x + width), left + 1, manifest.Width);
+        var bottom = Math.Clamp(Math.Ceiling(y + height), top + 1, manifest.Height);
+
+        Mutate("Crop Canvas", document =>
+        {
+            document.Width = checked((int)(right - left));
+            document.Height = checked((int)(bottom - top));
+
+            foreach (var layer in document.Layers)
+            {
+                layer.Transform.Origin =
+                [
+                    layer.Transform.X - left,
+                    layer.Transform.Y - top
+                ];
+            }
+        });
+    }
+
     public void NudgeSelected(double deltaX, double deltaY)
     {
         var layer = SelectedLayer;
