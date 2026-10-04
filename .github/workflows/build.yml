@@ -23,3 +23,15 @@ jobs:
 
       - name: Build
         run: dotnet build .\Compositor.Windows.sln -c Release --no-restore
+
+      - name: Publish Windows x64
+        if: github.event_name == 'push'
+        run: dotnet publish .\src\Compositor.Windows\Compositor.Windows.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\Compositor-Windows-V0.1
+
+      - name: Upload Windows build
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Compositor-Windows-V0.1-win-x64
+          path: .\artifacts\Compositor-Windows-V0.1
+          if-no-files-found: error
