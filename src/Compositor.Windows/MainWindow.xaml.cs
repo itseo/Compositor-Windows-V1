@@ -9,7 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Microsoft.UI.Xaml.Shapes;
+using Line = Microsoft.UI.Xaml.Shapes.Line;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.System;
