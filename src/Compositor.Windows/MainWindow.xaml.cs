@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using Compositor.Core.Models;
 using Compositor.Core.Services;
 using Compositor.Windows.Services;
@@ -8,6 +9,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Input;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Line = Microsoft.UI.Xaml.Shapes.Line;
 using Windows.ApplicationModel.DataTransfer;
@@ -26,6 +28,7 @@ public sealed partial class MainWindow : Window
     private readonly EditorSession _session = new();
     private readonly ImageImportService _imageImporter = new();
     private readonly ObservableCollection<LayerListItem> _layerItems = [];
+    private readonly AiBridgeHost _aiBridge;
 
     private string? _savedProjectPath;
     private string _displayName = "Untitled";
@@ -60,6 +63,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _aiBridge = new AiBridgeHost(HandleAiBridgeRequestAsync);
+        Closed += MainWindow_Closed;
         LayersList.ItemsSource = _layerItems;
         ExtendsContentIntoTitleBar = false;
         UpdateCommandState();
@@ -576,6 +581,7 @@ public sealed partial class MainWindow : Window
         }
 
         await RenderProjectAsync();
+        UpdateAiBridgeDiscovery();
     }
 
     private void PopulateLayers()
@@ -1173,6 +1179,420 @@ public sealed partial class MainWindow : Window
         await RefreshDocumentAsync();
     }
 
+    private async void AiBridge_Click(object sender, RoutedEventArgs e)
+    {
+        if (_aiBridge.IsRunning)
+        {
+            var disable = new ContentDialog
+            {
+                Title = "AI Bridge",
+                Content = "The local AI Bridge is enabled. Disabling it immediately disconnects MCP clients from this Compositor window.",
+                PrimaryButtonText = "Disable",
+                CloseButtonText = "Keep enabled",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = (Content as FrameworkElement)?.XamlRoot
+            };
+
+            if (await disable.ShowAsync() == ContentDialogResult.Primary)
+            {
+                await _aiBridge.StopAsync();
+                AiBridgeStatus.Text = "Off";
+                AiBridgeButton.Content = "AI";
+                StatusText.Text = "AI Bridge disabled";
+            }
+
+            return;
+        }
+
+        var enable = new ContentDialog
+        {
+            Title = "Enable AI Bridge?",
+            Content =
+                "This enables a local-only Named Pipe that exposes explicit Compositor editing tools to the bundled MCP companion. " +
+                "It does not open a network port and it does not send your document to an AI by itself. " +
+                "Your MCP client decides which model receives document metadata and which tools it may call.",
+            PrimaryButtonText = "Enable",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = (Content as FrameworkElement)?.XamlRoot
+        };
+
+        if (await enable.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        _aiBridge.Start();
+        UpdateAiBridgeDiscovery();
+        AiBridgeStatus.Text = "On";
+        AiBridgeButton.Content = "AI ✓";
+        StatusText.Text = "AI Bridge enabled · MCP tools ready";
+    }
+
+    private async void MainWindow_Closed(object sender, WindowEventArgs args)
+    {
+        await _aiBridge.StopAsync();
+    }
+
+    private void UpdateAiBridgeDiscovery()
+    {
+        var project = _session.Project;
+        _aiBridge.UpdateProject(
+            project?.PackagePath,
+            project?.Manifest.DocumentId,
+            _isModified);
+    }
+
+    private Task<object?> HandleAiBridgeRequestAsync(AiBridgeRequest request)
+    {
+        var completion = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        if (!DispatcherQueue.TryEnqueue(
+                DispatcherQueuePriority.Normal,
+                async () =>
+                {
+                    try
+                    {
+                        completion.SetResult(await ExecuteAiBridgeRequestAsync(request));
+                    }
+                    catch (Exception ex)
+                    {
+                        completion.SetException(ex);
+                    }
+                }))
+        {
+            completion.SetException(
+                new InvalidOperationException("Compositor's UI thread is not available."));
+        }
+
+        return completion.Task;
+    }
+
+    private async Task<object?> ExecuteAiBridgeRequestAsync(AiBridgeRequest request)
+    {
+        var method = request.Method.Trim().ToLowerInvariant();
+
+        if (method == "document.get")
+        {
+            return CreateAiDocumentSnapshot();
+        }
+
+        if (method == "layers.list")
+        {
+            EnsureAiProject();
+            return _session.Project!.Manifest.Layers.Select(CreateAiLayerSnapshot).ToArray();
+        }
+
+        if (method == "layer.select")
+        {
+            var layer = SelectAiLayer(request.Parameters);
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(layer);
+        }
+
+        if (method == "layer.rename")
+        {
+            var layer = SelectAiLayer(request.Parameters);
+            var name = RequiredString(request.Parameters, "name");
+            _session.RenameSelected(name);
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(_session.SelectedLayer!);
+        }
+
+        if (method == "layer.visibility")
+        {
+            var layer = SelectAiLayer(request.Parameters);
+            var visible = RequiredBoolean(request.Parameters, "visible");
+            if (layer.IsVisible != visible)
+            {
+                _session.ToggleSelectedVisibility();
+                MarkModified();
+                await RefreshDocumentAsync();
+            }
+
+            return CreateAiLayerSnapshot(_session.SelectedLayer!);
+        }
+
+        if (method == "layer.opacity")
+        {
+            SelectAiLayer(request.Parameters);
+            var opacity = RequiredDouble(request.Parameters, "opacity");
+            _session.SetSelectedOpacity(opacity);
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(_session.SelectedLayer!);
+        }
+
+        if (method == "layer.transform")
+        {
+            var layer = SelectAiLayer(request.Parameters);
+            if (layer.IsGroup)
+            {
+                throw new InvalidOperationException("Group transforms are not implemented yet.");
+            }
+
+            var transform = layer.Transform;
+            var x = OptionalDouble(request.Parameters, "x") ?? transform.X;
+            var y = OptionalDouble(request.Parameters, "y") ?? transform.Y;
+            var width = OptionalDouble(request.Parameters, "width") ?? transform.Width;
+            var height = OptionalDouble(request.Parameters, "height") ?? transform.Height;
+            var rotation = OptionalDouble(request.Parameters, "rotation") ?? transform.Rotation;
+
+            _session.SetSelectedTransform(x, y, width, height, rotation);
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(_session.SelectedLayer!);
+        }
+
+        if (method == "layer.flip")
+        {
+            var layer = SelectAiLayer(request.Parameters);
+            if (layer.IsGroup)
+            {
+                throw new InvalidOperationException("Groups cannot be flipped in this preview.");
+            }
+
+            var axis = RequiredString(request.Parameters, "axis").Trim().ToLowerInvariant();
+            if (axis is not ("horizontal" or "vertical"))
+            {
+                throw new ArgumentException("axis must be 'horizontal' or 'vertical'.");
+            }
+
+            _session.ToggleSelectedFlip(axis == "horizontal");
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(_session.SelectedLayer!);
+        }
+
+        if (method == "layer.duplicate")
+        {
+            SelectAiLayer(request.Parameters);
+            var duplicate = _session.DuplicateSelected();
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(duplicate);
+        }
+
+        if (method == "layer.delete")
+        {
+            var selected = SelectAiLayer(request.Parameters);
+            var deletedId = selected.Id;
+            _session.DeleteSelected();
+            MarkModified();
+            await RefreshDocumentAsync();
+            return new { deleted = deletedId, selectedLayerId = _session.SelectedLayerId };
+        }
+
+        if (method == "layer.import")
+        {
+            EnsureAiProject();
+            var path = RequiredString(request.Parameters, "path");
+            if (!Path.IsPathFullyQualified(path) || !File.Exists(path))
+            {
+                throw new FileNotFoundException("AI import requires an existing absolute local image path.", path);
+            }
+
+            var extension = Path.GetExtension(path);
+            if (!ImageImportService.SupportedExtensions.Contains(
+                    extension,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Unsupported image type '{extension}'.");
+            }
+
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            var imported = await _imageImporter.ImportAsync(file, _session.Project!);
+            var layer = CreateLayer(imported, _session.Project!, fitToCanvas: true);
+
+            if (TryString(request.Parameters, "name") is { } requestedName &&
+                !string.IsNullOrWhiteSpace(requestedName))
+            {
+                layer.Name = requestedName.Trim();
+            }
+
+            _session.AddLayer(layer, "AI Import Image");
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(layer);
+        }
+
+        if (method == "group.add")
+        {
+            EnsureAiProject();
+            var name = TryString(request.Parameters, "name");
+            var group = _session.AddGroup(
+                string.IsNullOrWhiteSpace(name) ? "Group" : name!);
+            MarkModified();
+            await RefreshDocumentAsync();
+            return CreateAiLayerSnapshot(group);
+        }
+
+        if (method == "history.undo")
+        {
+            EnsureAiProject();
+            var changed = _session.Undo();
+            if (changed)
+            {
+                _isModified = true;
+                await RefreshDocumentAsync();
+            }
+
+            return new { changed, selectedLayerId = _session.SelectedLayerId };
+        }
+
+        if (method == "history.redo")
+        {
+            EnsureAiProject();
+            var changed = _session.Redo();
+            if (changed)
+            {
+                _isModified = true;
+                await RefreshDocumentAsync();
+            }
+
+            return new { changed, selectedLayerId = _session.SelectedLayerId };
+        }
+
+        if (method == "project.save")
+        {
+            EnsureAiProject();
+            if (string.IsNullOrWhiteSpace(_savedProjectPath))
+            {
+                throw new InvalidOperationException(
+                    "This document has never been saved. Use Save As in Compositor once before an AI can save it.");
+            }
+
+            await SaveToAsync(_savedProjectPath);
+            return new { saved = true, path = _savedProjectPath };
+        }
+
+        throw new InvalidOperationException(
+            $"Unknown AI bridge method '{request.Method}'.");
+    }
+
+    private object CreateAiDocumentSnapshot()
+    {
+        EnsureAiProject();
+        var project = _session.Project!;
+        return new
+        {
+            app = "Compositor for Windows",
+            bridgeProtocol = 1,
+            document = new
+            {
+                id = project.Manifest.DocumentId,
+                projectPath = project.PackagePath,
+                savedPath = _savedProjectPath,
+                name = _displayName,
+                modified = _isModified,
+                width = project.Manifest.Width,
+                height = project.Manifest.Height,
+                resolution = project.Manifest.Resolution,
+                colorSpace = project.Manifest.ColorSpace,
+                activeLayerId = _session.SelectedLayerId,
+                layerCount = project.Manifest.Layers.Count
+            },
+            layers = project.Manifest.Layers.Select(CreateAiLayerSnapshot).ToArray()
+        };
+    }
+
+    private static object CreateAiLayerSnapshot(CompLayer layer)
+        => new
+        {
+            id = layer.Id,
+            name = layer.Name,
+            parentId = layer.ParentId,
+            isGroup = layer.IsGroup,
+            visible = layer.IsVisible,
+            opacity = layer.Opacity,
+            blendMode = layer.BlendMode,
+            imageFile = layer.ImageFile,
+            maskFile = layer.MaskFile,
+            maskEnabled = layer.MaskEnabled,
+            maskSourceId = layer.MaskSourceId,
+            transform = new
+            {
+                x = layer.Transform.X,
+                y = layer.Transform.Y,
+                width = layer.Transform.Width,
+                height = layer.Transform.Height,
+                rotation = layer.Transform.Rotation,
+                flipX = layer.Transform.FlipX,
+                flipY = layer.Transform.FlipY,
+                sampling = layer.Transform.Sampling
+            }
+        };
+
+    private CompLayer SelectAiLayer(JsonElement parameters)
+    {
+        EnsureAiProject();
+        var layerId = RequiredString(parameters, "layerId");
+        _session.Select(layerId);
+        return _session.SelectedLayer
+            ?? throw new KeyNotFoundException($"Layer '{layerId}' does not exist.");
+    }
+
+    private void EnsureAiProject()
+    {
+        if (_session.Project is null)
+        {
+            throw new InvalidOperationException(
+                "No document is open in Compositor.");
+        }
+    }
+
+    private static string RequiredString(JsonElement parameters, string property)
+        => TryString(parameters, property)
+            ?? throw new ArgumentException($"Missing required parameter '{property}'.");
+
+    private static string? TryString(JsonElement parameters, string property)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object ||
+            !parameters.TryGetProperty(property, out var value) ||
+            value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return value.GetString();
+    }
+
+    private static bool RequiredBoolean(JsonElement parameters, string property)
+    {
+        if (parameters.ValueKind == JsonValueKind.Object &&
+            parameters.TryGetProperty(property, out var value) &&
+            value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            return value.GetBoolean();
+        }
+
+        throw new ArgumentException($"Missing or invalid boolean parameter '{property}'.");
+    }
+
+    private static double RequiredDouble(JsonElement parameters, string property)
+        => OptionalDouble(parameters, property)
+            ?? throw new ArgumentException($"Missing or invalid numeric parameter '{property}'.");
+
+    private static double? OptionalDouble(JsonElement parameters, string property)
+    {
+        if (parameters.ValueKind != JsonValueKind.Object ||
+            !parameters.TryGetProperty(property, out var value) ||
+            value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number))
+        {
+            throw new ArgumentException($"Parameter '{property}' must be numeric.");
+        }
+
+        return number;
+    }
+
     private async void FlipHorizontal_Click(object sender, RoutedEventArgs e)
     {
         _session.ToggleSelectedFlip(horizontal: true);
@@ -1622,6 +2042,7 @@ public sealed partial class MainWindow : Window
         _isModified = true;
         UpdateCommandState();
         UpdateTitle();
+        UpdateAiBridgeDiscovery();
     }
 
     private void UpdateTitle()
