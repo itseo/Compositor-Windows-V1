@@ -25,14 +25,25 @@ jobs:
         run: dotnet build .\Compositor.Windows.sln -c Release --no-restore
 
       - name: Publish Windows x64
-        run: dotnet publish .\src\Compositor.Windows\Compositor.Windows.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\Compositor-Windows-V0.1
+        run: dotnet publish .\src\Compositor.Windows\Compositor.Windows.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\Compositor-Windows-V0.2
+
+      - name: Publish MCP companion
+        run: dotnet publish .\src\Compositor.Mcp\Compositor.Mcp.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\Compositor-Windows-V0.2\mcp
+
+      - name: Verify MCP companion
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".\artifacts\Compositor-Windows-V0.2\mcp\Compositor.Mcp.exe")) {
+            Write-Error "Compositor.Mcp.exe was not published."
+            exit 1
+          }
 
       - name: Smoke-test application startup
         shell: pwsh
         run: |
           $log = Join-Path $env:LOCALAPPDATA "CompositorWindows\startup.log"
           Remove-Item $log -Force -ErrorAction SilentlyContinue
-          $exe = Resolve-Path ".\artifacts\Compositor-Windows-V0.1\Compositor.Windows.exe"
+          $exe = Resolve-Path ".\artifacts\Compositor-Windows-V0.2\Compositor.Windows.exe"
           $process = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 5
           if ($process.HasExited) {
@@ -55,6 +66,6 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: Compositor-Windows-V0.1-win-x64
-          path: .\artifacts\Compositor-Windows-V0.1
+          name: Compositor-Windows-V0.2-win-x64
+          path: .\artifacts\Compositor-Windows-V0.2
           if-no-files-found: error
