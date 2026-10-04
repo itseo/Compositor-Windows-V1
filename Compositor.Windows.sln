@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compositor.Core", "src\Compositor.Core\Compositor.Core.csproj", "{B44AE9B3-25AF-4A73-A787-5237B02AE2EE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Compositor.Windows", "src\Compositor.Windows\Compositor.Windows.csproj", "{CF3555F3-4B41-4C85-AC1E-69E64F9A6501}"
+EndProject
+Global
+    GlobalSection(SolutionConfigurationPlatforms) = preSolution
+        Debug|Any CPU = Debug|Any CPU
+        Release|Any CPU = Release|Any CPU
+    EndGlobalSection
+    GlobalSection(ProjectConfigurationPlatforms) = postSolution
+        {B44AE9B3-25AF-4A73-A787-5237B02AE2EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {B44AE9B3-25AF-4A73-A787-5237B02AE2EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {B44AE9B3-25AF-4A73-A787-5237B02AE2EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {B44AE9B3-25AF-4A73-A787-5237B02AE2EE}.Release|Any CPU.Build.0 = Release|Any CPU
+        {CF3555F3-4B41-4C85-AC1E-69E64F9A6501}.Debug|Any CPU.ActiveCfg = Debug|x64
+        {CF3555F3-4B41-4C85-AC1E-69E64F9A6501}.Debug|Any CPU.Build.0 = Debug|x64
+        {CF3555F3-4B41-4C85-AC1E-69E64F9A6501}.Release|Any CPU.ActiveCfg = Release|x64
+        {CF3555F3-4B41-4C85-AC1E-69E64F9A6501}.Release|Any CPU.Build.0 = Release|x64
+    EndGlobalSection
+EndGlobal
