@@ -21,9 +21,8 @@ internal sealed class ImageImportService
     {
         layerId ??= Guid.NewGuid().ToString().ToUpperInvariant();
 
-        await using var input = await source.OpenStreamForReadAsync();
-        using var randomInput = input.AsRandomAccessStream();
-        var decoder = await BitmapDecoder.CreateAsync(randomInput);
+        using var input = await source.OpenAsync(FileAccessMode.Read);
+        var decoder = await BitmapDecoder.CreateAsync(input);
 
         var width = decoder.PixelWidth;
         var height = decoder.PixelHeight;
