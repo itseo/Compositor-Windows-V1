@@ -170,8 +170,7 @@
                         BorderBrush="#35393D"
                         BorderThickness="0,1,0,0"
                         Padding="12"
-                        x:Name="PropertiesPanel"
-                        IsEnabled="False">
+                        x:Name="PropertiesPanel">
                     <StackPanel Spacing="8">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -239,9 +238,9 @@
                         </Grid>
 
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Button Content="Show / Hide" Click="ToggleVisibility_Click" />
-                            <Button Content="Rotate -15°" Click="RotateLeft_Click" />
-                            <Button Content="Rotate +15°" Click="RotateRight_Click" />
+                            <Button x:Name="VisibilityButton" Content="Show / Hide" Click="ToggleVisibility_Click" IsEnabled="False" />
+                            <Button x:Name="RotateLeftButton" Content="Rotate -15°" Click="RotateLeft_Click" IsEnabled="False" />
+                            <Button x:Name="RotateRightButton" Content="Rotate +15°" Click="RotateRight_Click" IsEnabled="False" />
                         </StackPanel>
 
                         <TextBlock Text="Tip: drag a raster layer directly on the canvas to move it."
