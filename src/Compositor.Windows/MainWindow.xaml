@@ -182,17 +182,20 @@
                           HorizontalAlignment="Center"
                           VerticalAlignment="Center"
                           Margin="72">
-                        <Border x:Name="CanvasBorder"
-                                Background="#FFFFFF"
-                                BorderBrush="#4B4F54"
-                                BorderThickness="1"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center">
-                            <Canvas x:Name="ProjectCanvas"
-                                    Background="Transparent"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Top" />
-                        </Border>
+                        <Viewbox x:Name="CanvasViewbox"
+                                 Stretch="Fill"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center">
+                            <Border x:Name="CanvasBorder"
+                                    Background="#FFFFFF"
+                                    BorderBrush="#4B4F54"
+                                    BorderThickness="1">
+                                <Canvas x:Name="ProjectCanvas"
+                                        Background="Transparent"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Top" />
+                            </Border>
+                        </Viewbox>
                     </Grid>
                 </ScrollViewer>
 
