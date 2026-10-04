@@ -1,4 +1,4 @@
-name: release-v0.1.0-alpha
+name: release-v0.1.1-alpha
 
 on:
   push:
@@ -34,15 +34,15 @@ jobs:
       - name: Package application
         shell: pwsh
         run: |
-          Compress-Archive -Path .\artifacts\Compositor-Windows-V0.1\* -DestinationPath .\Compositor-Windows-V0.1.0-alpha-win-x64.zip -Force
+          Compress-Archive -Path .\artifacts\Compositor-Windows-V0.1\* -DestinationPath .\Compositor-Windows-V0.1.1-alpha-win-x64.zip -Force
           Compress-Archive -Path .\samples\Hello.comp -DestinationPath .\Hello.comp.zip -Force
 
       - name: Create GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0-alpha
+          tag_name: v0.1.1-alpha
           target_commitish: ${{ github.sha }}
-          name: Compositor for Windows v0.1.0-alpha
+          name: Compositor for Windows v0.1.1-alpha
           prerelease: true
           generate_release_notes: false
           body: |
@@ -66,5 +66,5 @@ jobs:
 
             This is an unofficial Windows port based on the MIT-licensed Compositor project by Robbie Tilton / Wonder Assembly LLC and is developed with assistance from OpenAI Codex.
           files: |
-            Compositor-Windows-V0.1.0-alpha-win-x64.zip
+            Compositor-Windows-V0.1.1-alpha-win-x64.zip
             Hello.comp.zip
