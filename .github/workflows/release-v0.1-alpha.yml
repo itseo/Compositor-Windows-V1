@@ -1,0 +1,70 @@
+name: release-v0.1.0-alpha
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v0.1-alpha.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore .\Compositor.Windows.sln
+
+      - name: Build
+        run: dotnet build .\Compositor.Windows.sln -c Release --no-restore
+
+      - name: Publish Windows x64
+        run: dotnet publish .\src\Compositor.Windows\Compositor.Windows.csproj -c Release -r win-x64 --self-contained true -o .\artifacts\Compositor-Windows-V0.1
+
+      - name: Package application
+        shell: pwsh
+        run: |
+          Compress-Archive -Path .\artifacts\Compositor-Windows-V0.1\* -DestinationPath .\Compositor-Windows-V0.1.0-alpha-win-x64.zip -Force
+          Compress-Archive -Path .\samples\Hello.comp -DestinationPath .\Hello.comp.zip -Force
+
+      - name: Create GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-alpha
+          target_commitish: ${{ github.sha }}
+          name: Compositor for Windows v0.1.0-alpha
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            First public Windows alpha build.
+
+            What works:
+            - Native WinUI 3 application
+            - Open and validate .comp package folders
+            - Render ordinary PNG layers
+            - Layer hierarchy, visibility and inherited opacity
+            - Position, size, rotation and flip transforms
+            - Layer panel
+            - Zoom, Fit and Reload
+
+            Current limitations:
+            - Normal blend mode renderer only
+            - No editing/saving yet
+            - No masks or adjustment layers yet
+            - No brush, selections, text or PSD support yet
+            - Unsigned alpha build; Windows SmartScreen may show a warning
+
+            This is an unofficial Windows port based on the MIT-licensed Compositor project by Robbie Tilton / Wonder Assembly LLC and is developed with assistance from OpenAI Codex.
+          files: |
+            Compositor-Windows-V0.1.0-alpha-win-x64.zip
+            Hello.comp.zip
