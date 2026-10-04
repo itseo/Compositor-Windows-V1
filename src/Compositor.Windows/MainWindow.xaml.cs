@@ -703,10 +703,10 @@ public sealed partial class MainWindow : Window
             ProjectCanvas.Height = manifest.Height;
             CanvasBorder.Width = manifest.Width;
             CanvasBorder.Height = manifest.Height;
-            CanvasSurface.Width = manifest.Width * _zoom;
-            CanvasSurface.Height = manifest.Height * _zoom;
-            CanvasBorder.RenderTransform = new ScaleTransform { ScaleX = _zoom, ScaleY = _zoom };
-            CanvasBorder.RenderTransformOrigin = new global::Windows.Foundation.Point(0, 0);
+            CanvasViewbox.Width = manifest.Width * _zoom;
+            CanvasViewbox.Height = manifest.Height * _zoom;
+            CanvasSurface.Width = CanvasViewbox.Width;
+            CanvasSurface.Height = CanvasViewbox.Height;
 
             var operations = _renderPlanBuilder.Build(project);
             var unsupportedBlendCount = 0;
@@ -1578,9 +1578,10 @@ public sealed partial class MainWindow : Window
         }
 
         var manifest = _session.Project.Manifest;
-        CanvasSurface.Width = manifest.Width * _zoom;
-        CanvasSurface.Height = manifest.Height * _zoom;
-        CanvasBorder.RenderTransform = new ScaleTransform { ScaleX = _zoom, ScaleY = _zoom };
+        CanvasViewbox.Width = manifest.Width * _zoom;
+        CanvasViewbox.Height = manifest.Height * _zoom;
+        CanvasSurface.Width = CanvasViewbox.Width;
+        CanvasSurface.Height = CanvasViewbox.Height;
         return Task.CompletedTask;
     }
 
