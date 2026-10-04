@@ -140,7 +140,7 @@ public sealed class EditorSession
 
     public void SetSelectedTransform(double x, double y, double width, double height, double rotation)
     {
-        if (![x, y, width, height, rotation].All(double.IsFinite))
+        if (!new[] { x, y, width, height, rotation }.All(double.IsFinite))
         {
             throw new ArgumentException("Transform values must be finite numbers.");
         }
