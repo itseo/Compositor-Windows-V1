@@ -7,8 +7,13 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.Shapes;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
+using Windows.System;
+using Windows.UI.Core;
 using Windows.Storage.Pickers;
 
 namespace Compositor.Windows;
@@ -39,6 +44,19 @@ public sealed partial class MainWindow : Window
     private string? _dragBeforeSelection;
     private FrameworkElement? _dragElement;
 
+    private EditorTool _tool = EditorTool.Move;
+    private bool _panning;
+    private global::Windows.Foundation.Point _panStart;
+    private double _panHorizontalStart;
+    private double _panVerticalStart;
+
+    private CompManifest? _handleBefore;
+    private string? _handleBeforeSelection;
+    private TransformSnapshot? _handleOriginal;
+    private string? _activeHandle;
+    private double _handleDeltaX;
+    private double _handleDeltaY;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -46,6 +64,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = false;
         UpdateCommandState();
         UpdateTitle();
+        SetTool(EditorTool.Move);
     }
 
     private async void NewProject_Click(object sender, RoutedEventArgs e)
@@ -544,6 +563,7 @@ public sealed partial class MainWindow : Window
         EmptyState.Visibility = Visibility.Collapsed;
         DocumentInfo.Text =
             $"{project.Manifest.Width:N0} × {project.Manifest.Height:N0} · {project.Manifest.Resolution:0.#} ppi · {project.Manifest.Layers.Count} layer(s)";
+        StatusCanvasText.Text = $"{project.Manifest.Width:N0} × {project.Manifest.Height:N0} px";
 
         PopulateLayers();
         UpdateProperties();
@@ -579,9 +599,10 @@ public sealed partial class MainWindow : Window
                         ? "Non-raster layer"
                         : layer.IsVisible ? layer.BlendMode : "Hidden";
 
+                var depth = GetLayerDepth(layer, project.Manifest.Layers);
                 _layerItems.Add(new LayerListItem(
                     layer.Id,
-                    layer.Name,
+                    $"{new string(' ', depth * 2)}{layer.Name}",
                     layer.IsGroup ? "▾" : layer.IsVisible ? "▣" : "□",
                     detail,
                     $"{layer.Opacity:P0}"));
@@ -658,6 +679,8 @@ public sealed partial class MainWindow : Window
         LayerUpButton.IsEnabled = hasSelection;
         LayerDownButton.IsEnabled = hasSelection;
         RenameButton.IsEnabled = hasSelection;
+        FlipHButton.IsEnabled = hasSelection && _session.SelectedLayer?.IsGroup == false;
+        FlipVButton.IsEnabled = hasSelection && _session.SelectedLayer?.IsGroup == false;
     }
 
     private async Task RenderProjectAsync()
@@ -762,29 +785,281 @@ public sealed partial class MainWindow : Window
     private void DrawSelectionOverlay()
     {
         var layer = _session.SelectedLayer;
-        if (layer is null || layer.IsGroup || string.IsNullOrWhiteSpace(layer.ImageFile) || !layer.IsVisible)
+        if (_tool != EditorTool.Move ||
+            layer is null ||
+            layer.IsGroup ||
+            string.IsNullOrWhiteSpace(layer.ImageFile) ||
+            !layer.IsVisible)
         {
             return;
         }
 
-        var border = new Border
+        var overlay = new Grid
         {
             Width = layer.Transform.Width,
             Height = layer.Transform.Height,
-            BorderBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 44, 142, 255)),
-            BorderThickness = new Thickness(Math.Max(1, 1 / _zoom)),
-            IsHitTestVisible = false,
+            IsHitTestVisible = true,
+            Tag = "__selection",
             RenderTransform = CreateTransform(layer)
         };
 
-        Canvas.SetLeft(border, layer.Transform.X);
-        Canvas.SetTop(border, layer.Transform.Y);
-        ProjectCanvas.Children.Add(border);
+        var border = new Border
+        {
+            BorderBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 58, 160, 255)),
+            BorderThickness = new Thickness(Math.Max(1, 1 / _zoom)),
+            IsHitTestVisible = false
+        };
+        overlay.Children.Add(border);
+
+        var rotationLine = new Border
+        {
+            Width = Math.Max(1, 1 / _zoom),
+            Height = 28 / _zoom,
+            Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 58, 160, 255)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, -28 / _zoom, 0, 0),
+            IsHitTestVisible = false
+        };
+        overlay.Children.Add(rotationLine);
+
+        AddTransformHandle(overlay, "nw", HorizontalAlignment.Left, VerticalAlignment.Top);
+        AddTransformHandle(overlay, "ne", HorizontalAlignment.Right, VerticalAlignment.Top);
+        AddTransformHandle(overlay, "se", HorizontalAlignment.Right, VerticalAlignment.Bottom);
+        AddTransformHandle(overlay, "sw", HorizontalAlignment.Left, VerticalAlignment.Bottom);
+
+        var rotate = CreateHandle("rotate");
+        rotate.HorizontalAlignment = HorizontalAlignment.Center;
+        rotate.VerticalAlignment = VerticalAlignment.Top;
+        rotate.Margin = new Thickness(0, -40 / _zoom, 0, 0);
+        overlay.Children.Add(rotate);
+
+        Canvas.SetLeft(overlay, layer.Transform.X);
+        Canvas.SetTop(overlay, layer.Transform.Y);
+        ProjectCanvas.Children.Add(overlay);
+    }
+
+    private void AddTransformHandle(
+        Grid overlay,
+        string tag,
+        HorizontalAlignment horizontal,
+        VerticalAlignment vertical)
+    {
+        var thumb = CreateHandle(tag);
+        thumb.HorizontalAlignment = horizontal;
+        thumb.VerticalAlignment = vertical;
+        var half = 5 / _zoom;
+        thumb.Margin = new Thickness(-half);
+        overlay.Children.Add(thumb);
+    }
+
+    private Thumb CreateHandle(string tag)
+    {
+        var size = Math.Clamp(10 / _zoom, 8, 18);
+        var thumb = new Thumb
+        {
+            Width = size,
+            Height = size,
+            Tag = tag,
+            Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 240, 245, 250)),
+            BorderBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 35, 120, 220)),
+            BorderThickness = new Thickness(Math.Max(1, 1 / _zoom))
+        };
+
+        thumb.DragStarted += TransformHandle_DragStarted;
+        thumb.DragDelta += TransformHandle_DragDelta;
+        thumb.DragCompleted += TransformHandle_DragCompleted;
+        return thumb;
+    }
+
+    private void TransformHandle_DragStarted(object sender, DragStartedEventArgs e)
+    {
+        var layer = _session.SelectedLayer;
+        if (_session.Project is null ||
+            layer is null ||
+            layer.IsGroup ||
+            sender is not Thumb thumb ||
+            thumb.Tag is not string handle)
+        {
+            return;
+        }
+
+        _activeHandle = handle;
+        _handleBefore = ManifestCloner.Clone(_session.Project.Manifest);
+        _handleBeforeSelection = _session.SelectedLayerId;
+        _handleOriginal = TransformSnapshot.From(layer.Transform);
+        _handleDeltaX = 0;
+        _handleDeltaY = 0;
+    }
+
+    private void TransformHandle_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        var layer = _session.SelectedLayer;
+        if (layer is null || _handleOriginal is null || _activeHandle is null)
+        {
+            return;
+        }
+
+        _handleDeltaX += e.HorizontalChange / Math.Max(_zoom, 0.01);
+        _handleDeltaY += e.VerticalChange / Math.Max(_zoom, 0.01);
+
+        if (_activeHandle == "rotate")
+        {
+            var rotation = _handleOriginal.Rotation + (_handleDeltaX - _handleDeltaY) * 0.45;
+            if (IsKeyDown(VirtualKey.Shift))
+            {
+                rotation = Math.Round(rotation / 15) * 15;
+            }
+
+            layer.Transform.Rotation = rotation;
+        }
+        else
+        {
+            ResizeFromHandle(layer, _activeHandle, _handleOriginal, _handleDeltaX, _handleDeltaY);
+        }
+
+        UpdateSelectedLayerVisuals();
+        UpdateProperties();
+        MarkModified();
+    }
+
+    private async void TransformHandle_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (_session.Project is not null && _handleBefore is not null)
+        {
+            _session.RecordExternalEdit(
+                _activeHandle == "rotate" ? "Rotate Layer" : "Resize Layer",
+                _handleBefore,
+                _handleBeforeSelection);
+        }
+
+        _handleBefore = null;
+        _handleBeforeSelection = null;
+        _handleOriginal = null;
+        _activeHandle = null;
+        await RefreshDocumentAsync();
+    }
+
+    private static void ResizeFromHandle(
+        CompLayer layer,
+        string handle,
+        TransformSnapshot original,
+        double pointerDx,
+        double pointerDy)
+    {
+        var sx = handle.Contains('e') ? 1.0 : -1.0;
+        var sy = handle.Contains('s') ? 1.0 : -1.0;
+        var radians = original.Rotation * Math.PI / 180.0;
+        var cos = Math.Cos(radians);
+        var sin = Math.Sin(radians);
+
+        var handlePoint = TransformPoint(
+            original.CenterX,
+            original.CenterY,
+            sx * original.Width / 2,
+            sy * original.Height / 2,
+            cos,
+            sin);
+
+        var anchorPoint = TransformPoint(
+            original.CenterX,
+            original.CenterY,
+            -sx * original.Width / 2,
+            -sy * original.Height / 2,
+            cos,
+            sin);
+
+        var candidateX = handlePoint.X + pointerDx;
+        var candidateY = handlePoint.Y + pointerDy;
+        var vx = candidateX - anchorPoint.X;
+        var vy = candidateY - anchorPoint.Y;
+
+        var localX = vx * cos + vy * sin;
+        var localY = -vx * sin + vy * cos;
+
+        var width = Math.Max(1, Math.Abs(localX));
+        var height = Math.Max(1, Math.Abs(localY));
+
+        if (IsKeyDown(VirtualKey.Shift))
+        {
+            var ratio = original.Width / Math.Max(1, original.Height);
+            if (width / Math.Max(1, height) > ratio)
+            {
+                height = width / ratio;
+            }
+            else
+            {
+                width = height * ratio;
+            }
+        }
+
+        var centerOffsetX = sx * width / 2;
+        var centerOffsetY = sy * height / 2;
+        var center = TransformPoint(
+            anchorPoint.X,
+            anchorPoint.Y,
+            centerOffsetX,
+            centerOffsetY,
+            cos,
+            sin);
+
+        layer.Transform.Size = [Math.Round(width), Math.Round(height)];
+        layer.Transform.Origin =
+        [
+            Math.Round(center.X - width / 2),
+            Math.Round(center.Y - height / 2)
+        ];
+    }
+
+    private static global::Windows.Foundation.Point TransformPoint(
+        double originX,
+        double originY,
+        double localX,
+        double localY,
+        double cos,
+        double sin)
+        => new(
+            originX + localX * cos - localY * sin,
+            originY + localX * sin + localY * cos);
+
+    private void UpdateSelectedLayerVisuals()
+    {
+        var layer = _session.SelectedLayer;
+        if (layer is null)
+        {
+            return;
+        }
+
+        foreach (var child in ProjectCanvas.Children.OfType<FrameworkElement>())
+        {
+            if (child.Tag is string tag &&
+                string.Equals(tag, layer.Id, StringComparison.OrdinalIgnoreCase) &&
+                child is Image image)
+            {
+                image.Width = layer.Transform.Width;
+                image.Height = layer.Transform.Height;
+                image.RenderTransform = CreateTransform(layer);
+                Canvas.SetLeft(image, layer.Transform.X);
+                Canvas.SetTop(image, layer.Transform.Y);
+            }
+
+            if (Equals(child.Tag, "__selection") && child is Grid overlay)
+            {
+                overlay.Width = layer.Transform.Width;
+                overlay.Height = layer.Transform.Height;
+                overlay.RenderTransform = CreateTransform(layer);
+                Canvas.SetLeft(overlay, layer.Transform.X);
+                Canvas.SetTop(overlay, layer.Transform.Y);
+            }
+        }
     }
 
     private void LayerImage_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is not FrameworkElement element || element.Tag is not string layerId || _session.Project is null)
+        if (_tool != EditorTool.Move ||
+            sender is not FrameworkElement element ||
+            element.Tag is not string layerId ||
+            _session.Project is null)
         {
             return;
         }
@@ -837,14 +1112,15 @@ public sealed partial class MainWindow : Window
         var dx = point.Position.X - _dragStart.X;
         var dy = point.Position.Y - _dragStart.Y;
 
-        layer.Transform.Origin =
-        [
-            Math.Round(_dragOriginX + dx),
-            Math.Round(_dragOriginY + dy)
-        ];
+        var desiredX = Math.Round(_dragOriginX + dx);
+        var desiredY = Math.Round(_dragOriginY + dy);
+        var snapped = SnapLayerPosition(layer, desiredX, desiredY);
+
+        layer.Transform.Origin = [snapped.X, snapped.Y];
 
         Canvas.SetLeft(_dragElement, layer.Transform.X);
         Canvas.SetTop(_dragElement, layer.Transform.Y);
+        DrawSnapGuides(snapped.GuideX, snapped.GuideY);
         UpdateProperties();
         StatusText.Text = $"Moving {layer.Name} · X {layer.Transform.X:0} · Y {layer.Transform.Y:0}";
         e.Handled = true;
@@ -884,6 +1160,7 @@ public sealed partial class MainWindow : Window
         _draggingLayer = false;
         _dragElement = null;
         _dragLayerId = null;
+        ClearSnapGuides();
 
         if (_dragBefore is not null)
         {
@@ -896,12 +1173,395 @@ public sealed partial class MainWindow : Window
         await RefreshDocumentAsync();
     }
 
+    private async void FlipHorizontal_Click(object sender, RoutedEventArgs e)
+    {
+        _session.ToggleSelectedFlip(horizontal: true);
+        MarkModified();
+        await RefreshDocumentAsync();
+    }
+
+    private async void FlipVertical_Click(object sender, RoutedEventArgs e)
+    {
+        _session.ToggleSelectedFlip(horizontal: false);
+        MarkModified();
+        await RefreshDocumentAsync();
+    }
+
+    private async void ActualPixels_Click(object sender, RoutedEventArgs e)
+    {
+        if (_session.Project is null)
+        {
+            return;
+        }
+
+        _zoom = 1;
+        ZoomSlider.Value = 100;
+        ZoomLabel.Text = "100%";
+        StatusZoomText.Text = "100%";
+        await ApplyZoomAsync();
+    }
+
+    private void ToolButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string tag &&
+            Enum.TryParse<EditorTool>(tag, ignoreCase: true, out var tool))
+        {
+            SetTool(tool);
+        }
+    }
+
+    private void SetTool(EditorTool tool)
+    {
+        _tool = tool;
+
+        MoveToolButton.Opacity = tool == EditorTool.Move ? 1 : 0.68;
+        HandToolButton.Opacity = tool == EditorTool.Hand ? 1 : 0.68;
+        ZoomToolButton.Opacity = tool == EditorTool.Zoom ? 1 : 0.68;
+
+        ToolHeaderTitle.Text = tool.ToString();
+        ToolHeaderHint.Text = tool switch
+        {
+            EditorTool.Move => "Drag a layer to move · Blue handles resize · Top handle rotates · Arrow keys nudge",
+            EditorTool.Hand => "Drag the workspace to pan · Space temporarily pans in the macOS version",
+            EditorTool.Zoom => "Click to zoom in · Right-click to zoom out · Fit and 100% are in the top bar",
+            _ => string.Empty
+        };
+
+        if (_session.Project is not null)
+        {
+            _ = RenderProjectAsync();
+        }
+    }
+
+    private void CanvasScrollViewer_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(CanvasScrollViewer);
+
+        if (_tool == EditorTool.Hand && point.Properties.IsLeftButtonPressed)
+        {
+            _panning = true;
+            _panStart = point.Position;
+            _panHorizontalStart = CanvasScrollViewer.HorizontalOffset;
+            _panVerticalStart = CanvasScrollViewer.VerticalOffset;
+            CanvasScrollViewer.CapturePointer(e.Pointer);
+            e.Handled = true;
+            return;
+        }
+
+        if (_tool == EditorTool.Zoom)
+        {
+            var factor = point.Properties.IsRightButtonPressed ? 0.8 : 1.25;
+            ZoomSlider.Value = Math.Clamp(_zoom * factor * 100, ZoomSlider.Minimum, ZoomSlider.Maximum);
+            e.Handled = true;
+        }
+    }
+
+    private void CanvasScrollViewer_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_panning || _tool != EditorTool.Hand)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(CanvasScrollViewer);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var dx = point.Position.X - _panStart.X;
+        var dy = point.Position.Y - _panStart.Y;
+        CanvasScrollViewer.ChangeView(
+            Math.Max(0, _panHorizontalStart - dx),
+            Math.Max(0, _panVerticalStart - dy),
+            null,
+            disableAnimation: true);
+        e.Handled = true;
+    }
+
+    private void CanvasScrollViewer_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_panning)
+        {
+            _panning = false;
+            CanvasScrollViewer.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+        }
+    }
+
+    private void Viewport_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = _session.Project is null ? "Open image" : "Add image layer";
+        }
+    }
+
+    private async void Viewport_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        var items = await e.DataView.GetStorageItemsAsync();
+        var files = items.OfType<StorageFile>()
+            .Where(file => ImageImportService.SupportedExtensions.Contains(
+                Path.GetExtension(file.Name),
+                StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_session.Project is null)
+            {
+                var first = files[0];
+                var size = await _imageImporter.ReadSizeAsync(first);
+                var workingPath = CreateTemporaryProjectPath();
+                var project = _session.CreateNew(
+                    workingPath,
+                    checked((int)size.Width),
+                    checked((int)size.Height));
+                var imported = await _imageImporter.ImportAsync(first, project);
+                _session.AddLayer(CreateLayer(imported, project, fitToCanvas: false), "Open Image");
+                _session.History.Reset();
+                _displayName = Path.GetFileNameWithoutExtension(first.Name);
+                _savedProjectPath = null;
+                _isModified = true;
+                files.RemoveAt(0);
+            }
+
+            foreach (var file in files)
+            {
+                var imported = await _imageImporter.ImportAsync(file, _session.Project!);
+                _session.AddLayer(CreateLayer(imported, _session.Project!, fitToCanvas: true));
+            }
+
+            MarkModified();
+            await RefreshDocumentAsync(fit: false);
+            StatusText.Text = "Image drop imported";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not import dropped image", FriendlyImageError(ex));
+        }
+    }
+
+    private async void Root_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_session.Project is null)
+        {
+            if (e.Key == VirtualKey.V) SetTool(EditorTool.Move);
+            else if (e.Key == VirtualKey.H) SetTool(EditorTool.Hand);
+            else if (e.Key == VirtualKey.Z) SetTool(EditorTool.Zoom);
+            return;
+        }
+
+        var control = IsKeyDown(VirtualKey.Control);
+        var shift = IsKeyDown(VirtualKey.Shift);
+
+        if (control && e.Key == VirtualKey.S)
+        {
+            Save_Click(sender, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (control && e.Key == VirtualKey.Z)
+        {
+            if (shift) Redo_Click(sender, new RoutedEventArgs());
+            else Undo_Click(sender, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (control && e.Key == VirtualKey.Y)
+        {
+            Redo_Click(sender, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == VirtualKey.Delete)
+        {
+            DeleteLayer_Click(sender, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (!control && e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
+        {
+            var step = shift ? 10 : 1;
+            var dx = e.Key == VirtualKey.Left ? -step : e.Key == VirtualKey.Right ? step : 0;
+            var dy = e.Key == VirtualKey.Up ? -step : e.Key == VirtualKey.Down ? step : 0;
+            _session.NudgeSelected(dx, dy);
+            MarkModified();
+            await RefreshDocumentAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (!control && e.Key == VirtualKey.V) SetTool(EditorTool.Move);
+        else if (!control && e.Key == VirtualKey.H) SetTool(EditorTool.Hand);
+        else if (!control && e.Key == VirtualKey.Z) SetTool(EditorTool.Zoom);
+        else if (control && e.Key == VirtualKey.Number0) Fit_Click(sender, new RoutedEventArgs());
+        else if (control && e.Key == VirtualKey.Number1) ActualPixels_Click(sender, new RoutedEventArgs());
+    }
+
+    private static bool IsKeyDown(VirtualKey key)
+    {
+        var state = InputKeyboardSource.GetKeyStateForCurrentThread(key);
+        return (state & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down;
+    }
+
+    private (double X, double Y, double? GuideX, double? GuideY) SnapLayerPosition(
+        CompLayer moving,
+        double desiredX,
+        double desiredY)
+    {
+        if (_session.Project is null || Math.Abs(moving.Transform.Rotation % 360) > 0.001)
+        {
+            return (desiredX, desiredY, null, null);
+        }
+
+        var width = moving.Transform.Width;
+        var height = moving.Transform.Height;
+        var manifest = _session.Project.Manifest;
+        var xs = new List<double> { 0, manifest.Width / 2.0, manifest.Width };
+        var ys = new List<double> { 0, manifest.Height / 2.0, manifest.Height };
+
+        foreach (var layer in manifest.Layers)
+        {
+            if (layer.IsGroup || string.Equals(layer.Id, moving.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            xs.Add(layer.Transform.X);
+            xs.Add(layer.Transform.X + layer.Transform.Width / 2);
+            xs.Add(layer.Transform.X + layer.Transform.Width);
+            ys.Add(layer.Transform.Y);
+            ys.Add(layer.Transform.Y + layer.Transform.Height / 2);
+            ys.Add(layer.Transform.Y + layer.Transform.Height);
+        }
+
+        var tolerance = 10 / Math.Max(_zoom, 0.05);
+        var xSnap = FindSnap([desiredX, desiredX + width / 2, desiredX + width], xs, tolerance);
+        var ySnap = FindSnap([desiredY, desiredY + height / 2, desiredY + height], ys, tolerance);
+
+        return (
+            desiredX + xSnap.Delta,
+            desiredY + ySnap.Delta,
+            xSnap.Target,
+            ySnap.Target);
+    }
+
+    private static (double Delta, double? Target) FindSnap(
+        IEnumerable<double> guides,
+        IEnumerable<double> targets,
+        double tolerance)
+    {
+        var best = double.PositiveInfinity;
+        double? targetValue = null;
+        var delta = 0.0;
+
+        foreach (var guide in guides)
+        {
+            foreach (var target in targets)
+            {
+                var candidate = target - guide;
+                if (Math.Abs(candidate) <= tolerance && Math.Abs(candidate) < best)
+                {
+                    best = Math.Abs(candidate);
+                    delta = candidate;
+                    targetValue = target;
+                }
+            }
+        }
+
+        return (delta, targetValue);
+    }
+
+    private void DrawSnapGuides(double? x, double? y)
+    {
+        ClearSnapGuides();
+        if (_session.Project is null)
+        {
+            return;
+        }
+
+        var stroke = new SolidColorBrush(global::Windows.UI.Color.FromArgb(220, 60, 170, 255));
+        var thickness = Math.Max(1, 1 / _zoom);
+
+        if (x is double gx)
+        {
+            ProjectCanvas.Children.Add(new Line
+            {
+                X1 = gx,
+                X2 = gx,
+                Y1 = 0,
+                Y2 = _session.Project.Manifest.Height,
+                Stroke = stroke,
+                StrokeThickness = thickness,
+                IsHitTestVisible = false,
+                Tag = "__snapguide"
+            });
+        }
+
+        if (y is double gy)
+        {
+            ProjectCanvas.Children.Add(new Line
+            {
+                X1 = 0,
+                X2 = _session.Project.Manifest.Width,
+                Y1 = gy,
+                Y2 = gy,
+                Stroke = stroke,
+                StrokeThickness = thickness,
+                IsHitTestVisible = false,
+                Tag = "__snapguide"
+            });
+        }
+    }
+
+    private void ClearSnapGuides()
+    {
+        foreach (var line in ProjectCanvas.Children
+                     .OfType<FrameworkElement>()
+                     .Where(x => Equals(x.Tag, "__snapguide"))
+                     .ToList())
+        {
+            ProjectCanvas.Children.Remove(line);
+        }
+    }
+
+    private static int GetLayerDepth(CompLayer layer, IReadOnlyList<CompLayer> layers)
+    {
+        var byId = layers.ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+        var depth = 0;
+        var parent = layer.ParentId;
+        while (parent is not null && depth < 32 && byId.TryGetValue(parent, out var group))
+        {
+            depth++;
+            parent = group.ParentId;
+        }
+
+        return depth;
+    }
+
     private async void ZoomSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
         _zoom = Math.Clamp(e.NewValue / 100.0, 0.05, 2.0);
         if (ZoomLabel is not null)
         {
             ZoomLabel.Text = $"{e.NewValue:0}%";
+            StatusZoomText.Text = $"{e.NewValue:0}%";
         }
 
         if (_session.Project is not null && ProjectCanvas is not null)
@@ -953,6 +1613,7 @@ public sealed partial class MainWindow : Window
         _zoom = fit;
         ZoomSlider.Value = fit * 100;
         ZoomLabel.Text = $"{fit * 100:0}%";
+        StatusZoomText.Text = $"{fit * 100:0}%";
     }
 
     private void MarkModified()
@@ -1186,6 +1847,32 @@ public sealed partial class MainWindow : Window
         }
 
         return ex.Message;
+    }
+
+    private enum EditorTool
+    {
+        Move,
+        Hand,
+        Zoom
+    }
+
+    private sealed record TransformSnapshot(
+        double X,
+        double Y,
+        double Width,
+        double Height,
+        double Rotation)
+    {
+        public double CenterX => X + Width / 2;
+        public double CenterY => Y + Height / 2;
+
+        public static TransformSnapshot From(CompTransform transform)
+            => new(
+                transform.X,
+                transform.Y,
+                transform.Width,
+                transform.Height,
+                transform.Rotation);
     }
 
     private sealed record LayerListItem(
