@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Text.Json;
 using Compositor.Core.Models;
 using Compositor.Core.Services;
@@ -12,6 +13,7 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Line = Microsoft.UI.Xaml.Shapes.Line;
+using Rectangle = Microsoft.UI.Xaml.Shapes.Rectangle;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.System;
@@ -59,6 +61,11 @@ public sealed partial class MainWindow : Window
     private string? _activeHandle;
     private double _handleDeltaX;
     private double _handleDeltaY;
+
+    private bool _drawingSelection;
+    private global::Windows.Foundation.Point _selectionStart;
+    private global::Windows.Foundation.Rect? _selectionRect;
+    private double _cropAspectRatio;
 
     public MainWindow()
     {
@@ -734,6 +741,7 @@ public sealed partial class MainWindow : Window
             }
 
             DrawSelectionOverlay();
+            DrawMarqueeOverlay();
 
             var rendered = operations.Count(x => x.EffectiveVisible && x.EffectiveOpacity > 0);
             StatusText.Text = unsupportedBlendCount == 0
@@ -1635,22 +1643,252 @@ public sealed partial class MainWindow : Window
         _tool = tool;
 
         MoveToolButton.Opacity = tool == EditorTool.Move ? 1 : 0.68;
+        MarqueeToolButton.Opacity = tool == EditorTool.Marquee ? 1 : 0.68;
+        CropToolButton.Opacity = tool == EditorTool.Crop ? 1 : 0.68;
         HandToolButton.Opacity = tool == EditorTool.Hand ? 1 : 0.68;
         ZoomToolButton.Opacity = tool == EditorTool.Zoom ? 1 : 0.68;
 
-        ToolHeaderTitle.Text = tool.ToString();
+        ToolHeaderTitle.Text = tool switch
+        {
+            EditorTool.Marquee => "Rectangle Marquee",
+            EditorTool.Crop => "Crop",
+            _ => tool.ToString()
+        };
         ToolHeaderHint.Text = tool switch
         {
             EditorTool.Move => "Drag a layer to move · Blue handles resize · Top handle rotates · Arrow keys nudge",
+            EditorTool.Marquee => "Drag to select · Ctrl+D or Escape clears the selection",
+            EditorTool.Crop => "Drag a crop area · choose a ratio · Apply crop keeps layer pixels non-destructive",
             EditorTool.Hand => "Drag the workspace to pan · Space temporarily pans in the macOS version",
             EditorTool.Zoom => "Click to zoom in · Right-click to zoom out · Fit and 100% are in the top bar",
             _ => string.Empty
         };
 
+        CropRatioBox.Visibility = tool == EditorTool.Crop ? Visibility.Visible : Visibility.Collapsed;
+        ApplyCropButton.Visibility = tool == EditorTool.Crop ? Visibility.Visible : Visibility.Collapsed;
+        ClearSelectionButton.Visibility =
+            tool is EditorTool.Crop or EditorTool.Marquee ? Visibility.Visible : Visibility.Collapsed;
+        FlipHButton.Visibility = tool == EditorTool.Move ? Visibility.Visible : Visibility.Collapsed;
+        FlipVButton.Visibility = tool == EditorTool.Move ? Visibility.Visible : Visibility.Collapsed;
+        ApplyCropButton.IsEnabled = tool == EditorTool.Crop && _selectionRect is { Width: >= 1, Height: >= 1 };
+
         if (_session.Project is not null)
         {
             _ = RenderProjectAsync();
         }
+    }
+
+    private void ProjectCanvas_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_session.Project is null ||
+            _tool is not (EditorTool.Marquee or EditorTool.Crop))
+        {
+            return;
+        }
+
+        var current = e.GetCurrentPoint(ProjectCanvas);
+        if (!current.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _drawingSelection = true;
+        _selectionStart = ClampDocumentPoint(current.Position);
+        _selectionRect = new global::Windows.Foundation.Rect(
+            _selectionStart.X,
+            _selectionStart.Y,
+            0,
+            0);
+
+        ProjectCanvas.CapturePointer(e.Pointer);
+        DrawMarqueeOverlay();
+        e.Handled = true;
+    }
+
+    private void ProjectCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_drawingSelection || _session.Project is null)
+        {
+            return;
+        }
+
+        var current = e.GetCurrentPoint(ProjectCanvas);
+        if (!current.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var point = ClampDocumentPoint(current.Position);
+        _selectionRect = BuildSelectionRect(
+            _selectionStart,
+            point,
+            _tool == EditorTool.Crop ? _cropAspectRatio : 0);
+
+        ApplyCropButton.IsEnabled =
+            _tool == EditorTool.Crop &&
+            _selectionRect is { Width: >= 1, Height: >= 1 };
+
+        DrawMarqueeOverlay();
+        StatusText.Text = _selectionRect is { } rect
+            ? $"Selection {rect.Width:0} × {rect.Height:0} px · X {rect.X:0} · Y {rect.Y:0}"
+            : "Selecting…";
+        e.Handled = true;
+    }
+
+    private void ProjectCanvas_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_drawingSelection)
+        {
+            return;
+        }
+
+        _drawingSelection = false;
+        ProjectCanvas.ReleasePointerCapture(e.Pointer);
+
+        if (_selectionRect is { } rect && (rect.Width < 1 || rect.Height < 1))
+        {
+            _selectionRect = null;
+        }
+
+        ApplyCropButton.IsEnabled =
+            _tool == EditorTool.Crop &&
+            _selectionRect is { Width: >= 1, Height: >= 1 };
+
+        DrawMarqueeOverlay();
+        e.Handled = true;
+    }
+
+    private async void ApplyCrop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_session.Project is null || _selectionRect is not { } rect)
+        {
+            return;
+        }
+
+        try
+        {
+            _session.CropCanvas(rect.X, rect.Y, rect.Width, rect.Height);
+            _selectionRect = null;
+            MarkModified();
+            SetTool(EditorTool.Move);
+            await RefreshDocumentAsync(fit: true);
+            StatusText.Text = "Canvas cropped";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not crop canvas", ex.Message);
+        }
+    }
+
+    private async void ClearSelection_Click(object sender, RoutedEventArgs e)
+    {
+        _selectionRect = null;
+        ApplyCropButton.IsEnabled = false;
+        await RenderProjectAsync();
+        StatusText.Text = "Selection cleared";
+    }
+
+    private void CropRatioBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CropRatioBox.SelectedItem is ComboBoxItem item &&
+            item.Tag is string tag &&
+            double.TryParse(
+                tag,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var ratio))
+        {
+            _cropAspectRatio = ratio;
+        }
+        else
+        {
+            _cropAspectRatio = 0;
+        }
+    }
+
+    private global::Windows.Foundation.Point ClampDocumentPoint(
+        global::Windows.Foundation.Point point)
+    {
+        var manifest = _session.Project!.Manifest;
+        return new global::Windows.Foundation.Point(
+            Math.Clamp(point.X, 0, manifest.Width),
+            Math.Clamp(point.Y, 0, manifest.Height));
+    }
+
+    private global::Windows.Foundation.Rect BuildSelectionRect(
+        global::Windows.Foundation.Point start,
+        global::Windows.Foundation.Point current,
+        double aspectRatio)
+    {
+        var dx = current.X - start.X;
+        var dy = current.Y - start.Y;
+        var width = Math.Abs(dx);
+        var height = Math.Abs(dy);
+
+        if (aspectRatio > 0 && width > 0 && height > 0)
+        {
+            if (width / height > aspectRatio)
+            {
+                width = height * aspectRatio;
+            }
+            else
+            {
+                height = width / aspectRatio;
+            }
+        }
+
+        var x = dx < 0 ? start.X - width : start.X;
+        var y = dy < 0 ? start.Y - height : start.Y;
+
+        if (_session.Project is { } project)
+        {
+            width = Math.Min(width, project.Manifest.Width - x);
+            height = Math.Min(height, project.Manifest.Height - y);
+        }
+
+        return new global::Windows.Foundation.Rect(
+            Math.Round(x),
+            Math.Round(y),
+            Math.Round(Math.Max(0, width)),
+            Math.Round(Math.Max(0, height)));
+    }
+
+    private void DrawMarqueeOverlay()
+    {
+        foreach (var existing in ProjectCanvas.Children
+                     .OfType<FrameworkElement>()
+                     .Where(x => Equals(x.Tag, "__marquee"))
+                     .ToList())
+        {
+            ProjectCanvas.Children.Remove(existing);
+        }
+
+        if (_selectionRect is not { } rect ||
+            rect.Width < 1 ||
+            rect.Height < 1)
+        {
+            return;
+        }
+
+        var outline = new Rectangle
+        {
+            Width = rect.Width,
+            Height = rect.Height,
+            Stroke = new SolidColorBrush(
+                global::Windows.UI.Color.FromArgb(255, 70, 170, 255)),
+            StrokeThickness = Math.Max(1, 1 / _zoom),
+            StrokeDashArray = new DoubleCollection { 6 / _zoom, 4 / _zoom },
+            Fill = _tool == EditorTool.Crop
+                ? new SolidColorBrush(
+                    global::Windows.UI.Color.FromArgb(22, 70, 170, 255))
+                : null,
+            IsHitTestVisible = false,
+            Tag = "__marquee"
+        };
+
+        Canvas.SetLeft(outline, rect.X);
+        Canvas.SetTop(outline, rect.Y);
+        ProjectCanvas.Children.Add(outline);
     }
 
     private void CanvasScrollViewer_PointerPressed(object sender, PointerRoutedEventArgs e)
@@ -1810,7 +2048,26 @@ public sealed partial class MainWindow : Window
 
         if (e.Key == VirtualKey.Delete)
         {
-            DeleteLayer_Click(sender, new RoutedEventArgs());
+            if (_selectionRect is not null && _tool is EditorTool.Marquee or EditorTool.Crop)
+            {
+                _selectionRect = null;
+                ApplyCropButton.IsEnabled = false;
+                await RenderProjectAsync();
+            }
+            else
+            {
+                DeleteLayer_Click(sender, new RoutedEventArgs());
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if ((control && e.Key == VirtualKey.D) || e.Key == VirtualKey.Escape)
+        {
+            _selectionRect = null;
+            ApplyCropButton.IsEnabled = false;
+            await RenderProjectAsync();
             e.Handled = true;
             return;
         }
@@ -1828,6 +2085,8 @@ public sealed partial class MainWindow : Window
         }
 
         if (!control && e.Key == VirtualKey.V) SetTool(EditorTool.Move);
+        else if (!control && e.Key == VirtualKey.M) SetTool(EditorTool.Marquee);
+        else if (!control && e.Key == VirtualKey.C) SetTool(EditorTool.Crop);
         else if (!control && e.Key == VirtualKey.H) SetTool(EditorTool.Hand);
         else if (!control && e.Key == VirtualKey.Z) SetTool(EditorTool.Zoom);
         else if (control && e.Key == VirtualKey.Number0) Fit_Click(sender, new RoutedEventArgs());
@@ -2274,6 +2533,8 @@ public sealed partial class MainWindow : Window
     private enum EditorTool
     {
         Move,
+        Marquee,
+        Crop,
         Hand,
         Zoom
     }
