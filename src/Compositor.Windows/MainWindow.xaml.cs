@@ -1257,7 +1257,7 @@ public sealed partial class MainWindow : Window
             TaskCreationOptions.RunContinuationsAsynchronously);
 
         if (!DispatcherQueue.TryEnqueue(
-                DispatcherQueuePriority.Normal,
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal,
                 async () =>
                 {
                     try
