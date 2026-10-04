@@ -1114,7 +1114,6 @@ public sealed partial class MainWindow : Window
         {
             Header = header,
             Text = initial,
-            SelectAllOnFocus = true,
             Width = 340
         };
 
