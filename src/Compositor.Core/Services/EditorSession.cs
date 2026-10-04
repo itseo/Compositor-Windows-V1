@@ -142,7 +142,7 @@ public sealed class EditorSession
     {
         EnsureProject();
 
-        if (![x, y, width, height].All(double.IsFinite) ||
+        if (!new[] { x, y, width, height }.All(double.IsFinite) ||
             width < 1 ||
             height < 1)
         {
