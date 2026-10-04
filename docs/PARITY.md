@@ -50,7 +50,7 @@ Legend:
 
 | Feature | Windows |
 | --- | --- |
-| Rectangle marquee | ⬜ |
+| Rectangle marquee | 🟡 geometric selection core |
 | Ellipse marquee | ⬜ |
 | Freehand lasso | ⬜ |
 | Polygonal lasso | ⬜ |
@@ -119,7 +119,7 @@ Legend:
 | Multiple projects/tabs | ⬜ |
 | Rulers / draggable guides | ⬜ |
 | Layout grid | ⬜ |
-| Crop | ⬜ |
+| Crop | 🟡 free + ratio crop, undoable |
 | Canvas Size | ⬜ |
 | Image Size | ⬜ |
 | Trim | ⬜ |
@@ -128,6 +128,7 @@ Legend:
 | Background saving | ⬜ |
 | Live external .comp refresh | 🟡 reload exists; watcher pending |
 | Remappable keyboard shortcuts | ⬜ |
+| MCP / AI editing bridge | 🟡 local named-pipe bridge + stdio MCP companion |
 
 ## Editor chrome
 
