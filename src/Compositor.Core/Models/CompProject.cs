@@ -1,7 +1,17 @@
 namespace Compositor.Core.Models;
 
-public sealed record CompProject(string PackagePath, CompManifest Manifest)
+public sealed class CompProject
 {
+    public CompProject(string packagePath, CompManifest manifest)
+    {
+        PackagePath = Path.GetFullPath(packagePath);
+        Manifest = manifest;
+    }
+
+    public string PackagePath { get; set; }
+
+    public CompManifest Manifest { get; set; }
+
     public string ImagesPath => Path.Combine(PackagePath, "images");
 
     public string ResolveImagePath(string imageFile)

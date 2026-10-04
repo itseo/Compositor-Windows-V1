@@ -30,6 +30,9 @@ public sealed class CompManifest
 
     [JsonPropertyName("layers")]
     public List<CompLayer> Layers { get; set; } = [];
+
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
 }
 
 public sealed class CompLayer
@@ -74,6 +77,9 @@ public sealed class CompLayer
     // V0.1 does not implement editable adjustment layers yet.
     [JsonPropertyName("adjustment")]
     public object? Adjustment { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
 }
 
 public sealed class CompTransform
@@ -107,4 +113,7 @@ public sealed class CompTransform
 
     [JsonIgnore]
     public double Height => Size.Length >= 2 ? Size[1] : 0;
+
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
 }
