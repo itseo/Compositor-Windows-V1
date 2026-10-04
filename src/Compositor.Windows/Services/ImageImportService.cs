@@ -14,6 +14,13 @@ internal sealed class ImageImportService
         ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".heic"
     ];
 
+    public async Task<(uint Width, uint Height)> ReadSizeAsync(StorageFile source)
+    {
+        using var input = await source.OpenAsync(FileAccessMode.Read);
+        var decoder = await BitmapDecoder.CreateAsync(input);
+        return (decoder.PixelWidth, decoder.PixelHeight);
+    }
+
     public async Task<ImportedRaster> ImportAsync(
         StorageFile source,
         CompProject project,
