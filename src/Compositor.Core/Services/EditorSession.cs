@@ -138,6 +138,45 @@ public sealed class EditorSession
     public void SetSelectedOpacity(double opacity)
         => Mutate("Change Layer Opacity", _ => SelectedLayer!.Opacity = Math.Clamp(opacity, 0, 1));
 
+    public void NudgeSelected(double deltaX, double deltaY)
+    {
+        var layer = SelectedLayer;
+        if (layer is null || layer.IsGroup)
+        {
+            return;
+        }
+
+        Mutate("Nudge Layer", _ =>
+        {
+            layer.Transform.Origin =
+            [
+                layer.Transform.X + deltaX,
+                layer.Transform.Y + deltaY
+            ];
+        });
+    }
+
+    public void ToggleSelectedFlip(bool horizontal)
+    {
+        var layer = SelectedLayer;
+        if (layer is null || layer.IsGroup)
+        {
+            return;
+        }
+
+        Mutate(horizontal ? "Flip Layer Horizontally" : "Flip Layer Vertically", _ =>
+        {
+            if (horizontal)
+            {
+                layer.Transform.FlipX = !layer.Transform.FlipX;
+            }
+            else
+            {
+                layer.Transform.FlipY = !layer.Transform.FlipY;
+            }
+        });
+    }
+
     public void SetSelectedTransform(double x, double y, double width, double height, double rotation)
     {
         if (!new[] { x, y, width, height, rotation }.All(double.IsFinite))
