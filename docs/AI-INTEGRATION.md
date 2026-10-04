@@ -63,6 +63,7 @@ Selection and layer editing:
 - `delete_layer`
 - `import_image`
 - `add_group`
+- `crop_canvas`
 
 History and persistence:
 - `undo`
