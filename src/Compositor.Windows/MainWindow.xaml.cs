@@ -126,7 +126,7 @@ public sealed partial class MainWindow : Window
             CanvasSurface.Width = manifest.Width * _zoom;
             CanvasSurface.Height = manifest.Height * _zoom;
             CanvasBorder.RenderTransform = new ScaleTransform { ScaleX = _zoom, ScaleY = _zoom };
-            CanvasBorder.RenderTransformOrigin = new Windows.Foundation.Point(0, 0);
+            CanvasBorder.RenderTransformOrigin = new global::Windows.Foundation.Point(0, 0);
 
             var operations = _renderPlanBuilder.Build(_project);
             var unsupportedBlendCount = 0;
