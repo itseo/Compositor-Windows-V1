@@ -603,7 +603,10 @@ public sealed partial class MainWindow : Window
         {
             var layer = _session.SelectedLayer;
             var enabled = layer is not null;
-            PropertiesPanel.IsEnabled = enabled;
+            RenameButton.IsEnabled = enabled;
+            VisibilityButton.IsEnabled = enabled;
+            RotateLeftButton.IsEnabled = enabled && layer?.IsGroup == false;
+            RotateRightButton.IsEnabled = enabled && layer?.IsGroup == false;
 
             if (layer is null)
             {
