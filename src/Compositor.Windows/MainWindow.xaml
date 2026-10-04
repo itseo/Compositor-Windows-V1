@@ -14,11 +14,21 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <CommandBar Grid.Row="0" DefaultLabelPosition="Right" Background="{StaticResource PanelBackgroundBrush}">
-            <AppBarButton Icon="OpenFile" Label="Open .comp" Click="OpenProject_Click" />
-            <AppBarButton Icon="Refresh" Label="Reload" Click="Reload_Click" IsEnabled="False" x:Name="ReloadButton" />
+        <CommandBar Grid.Row="0"
+                    DefaultLabelPosition="Right"
+                    IsOpen="False"
+                    Background="{StaticResource PanelBackgroundBrush}">
+            <AppBarButton Label="New" Click="NewProject_Click" />
+            <AppBarButton Label="Open image" Click="OpenImage_Click" />
+            <AppBarButton Label="Open .comp" Click="OpenProject_Click" />
+            <AppBarButton Label="Save" Click="Save_Click" x:Name="SaveButton" IsEnabled="False" />
+            <AppBarButton Label="Save as" Click="SaveAs_Click" x:Name="SaveAsButton" IsEnabled="False" />
             <AppBarSeparator />
-            <AppBarButton Icon="ZoomIn" Label="Fit" Click="Fit_Click" />
+            <AppBarButton Label="Undo" Click="Undo_Click" x:Name="UndoButton" IsEnabled="False" />
+            <AppBarButton Label="Redo" Click="Redo_Click" x:Name="RedoButton" IsEnabled="False" />
+            <AppBarSeparator />
+            <AppBarButton Label="Add layer" Click="AddLayer_Click" x:Name="AddLayerButton" IsEnabled="False" />
+            <AppBarButton Label="Fit" Click="Fit_Click" />
             <CommandBar.Content>
                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <TextBlock Text="Zoom" VerticalAlignment="Center" Opacity="0.7" />
@@ -26,7 +36,7 @@
                             Minimum="5"
                             Maximum="200"
                             Value="50"
-                            Width="180"
+                            Width="150"
                             StepFrequency="5"
                             ValueChanged="ZoomSlider_ValueChanged" />
                     <TextBlock x:Name="ZoomLabel" Text="50%" Width="48" VerticalAlignment="Center" />
@@ -37,7 +47,7 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="340" />
             </Grid.ColumnDefinitions>
 
             <Grid Grid.Column="0" x:Name="ViewportHost" Background="{StaticResource CanvasBackdropBrush}">
@@ -66,41 +76,66 @@
                 <Border x:Name="EmptyState"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Padding="28"
+                        Padding="32"
                         CornerRadius="12"
-                        Background="#C9222528">
-                    <StackPanel Spacing="8" HorizontalAlignment="Center">
+                        Background="#E0222528">
+                    <StackPanel Spacing="10" HorizontalAlignment="Center">
                         <TextBlock Text="Compositor for Windows"
-                                   FontSize="24"
+                                   FontSize="26"
                                    FontWeight="SemiBold"
                                    HorizontalAlignment="Center" />
-                        <TextBlock Text="Open a .comp package to begin"
-                                   Opacity="0.7"
+                        <TextBlock Text="V0.2 editor"
+                                   FontSize="13"
+                                   Opacity="0.55"
                                    HorizontalAlignment="Center" />
-                        <Button Content="Open .comp"
-                                HorizontalAlignment="Center"
-                                Margin="0,8,0,0"
-                                Click="OpenProject_Click" />
+                        <TextBlock Text="Create a document, open an image or load a .comp project."
+                                   MaxWidth="360"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Opacity="0.75" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,8,0,0">
+                            <Button Content="New" Click="NewProject_Click" />
+                            <Button Content="Open image" Click="OpenImage_Click" />
+                            <Button Content="Open .comp" Click="OpenProject_Click" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>
 
-            <Grid Grid.Column="1" Background="{StaticResource PanelBackgroundBrush}" BorderBrush="#35393D" BorderThickness="1,0,0,0">
+            <Grid Grid.Column="1"
+                  Background="{StaticResource PanelBackgroundBrush}"
+                  BorderBrush="#35393D"
+                  BorderThickness="1,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Padding="16,14,16,12" Spacing="4">
+                <StackPanel Grid.Row="0" Padding="16,14,16,10" Spacing="4">
                     <TextBlock Text="LAYERS" FontSize="12" FontWeight="SemiBold" Opacity="0.65" />
-                    <TextBlock x:Name="DocumentInfo" Text="No document" FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+                    <TextBlock x:Name="DocumentInfo"
+                               Text="No document"
+                               FontSize="12"
+                               Opacity="0.55"
+                               TextWrapping="Wrap" />
                 </StackPanel>
 
-                <ListView Grid.Row="1"
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="5" Padding="8,0,8,8">
+                    <Button Content="+" ToolTipService.ToolTip="Add image layer" Click="AddLayer_Click" x:Name="LayerAddButton" IsEnabled="False" />
+                    <Button Content="Folder" Click="AddGroup_Click" x:Name="AddGroupButton" IsEnabled="False" />
+                    <Button Content="Copy" Click="DuplicateLayer_Click" x:Name="DuplicateButton" IsEnabled="False" />
+                    <Button Content="Delete" Click="DeleteLayer_Click" x:Name="DeleteButton" IsEnabled="False" />
+                    <Button Content="↑" Click="LayerUp_Click" x:Name="LayerUpButton" IsEnabled="False" />
+                    <Button Content="↓" Click="LayerDown_Click" x:Name="LayerDownButton" IsEnabled="False" />
+                </StackPanel>
+
+                <ListView Grid.Row="2"
                           x:Name="LayersList"
                           SelectionMode="Single"
-                          IsItemClickEnabled="False"
-                          Padding="8,0,8,12">
+                          SelectionChanged="LayersList_SelectionChanged"
+                          Padding="8,0,8,8">
                     <ListView.ItemTemplate>
                         <DataTemplate>
                             <Grid Padding="8,7">
@@ -109,16 +144,112 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="{Binding KindGlyph}" VerticalAlignment="Center" Opacity="0.65" />
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding KindGlyph}"
+                                           VerticalAlignment="Center"
+                                           Opacity="0.7" />
                                 <StackPanel Grid.Column="1" Spacing="2">
                                     <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.5" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Detail}"
+                                               FontSize="11"
+                                               Opacity="0.5"
+                                               TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
-                                <TextBlock Grid.Column="2" Text="{Binding OpacityText}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" Margin="8,0,0,0" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding OpacityText}"
+                                           FontSize="11"
+                                           Opacity="0.5"
+                                           VerticalAlignment="Center"
+                                           Margin="8,0,0,0" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+
+                <Border Grid.Row="3"
+                        BorderBrush="#35393D"
+                        BorderThickness="0,1,0,0"
+                        Padding="12"
+                        x:Name="PropertiesPanel"
+                        IsEnabled="False">
+                    <StackPanel Spacing="8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="TRANSFORM"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Opacity="0.65"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Content="Rename"
+                                    Click="RenameLayer_Click"
+                                    x:Name="RenameButton" />
+                        </Grid>
+
+                        <Grid ColumnSpacing="8" RowSpacing="7">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <NumberBox Grid.Row="0" Grid.Column="0"
+                                       x:Name="XBox"
+                                       Header="X"
+                                       SpinButtonPlacementMode="Compact"
+                                       ValueChanged="TransformBox_ValueChanged" />
+                            <NumberBox Grid.Row="0" Grid.Column="1"
+                                       x:Name="YBox"
+                                       Header="Y"
+                                       SpinButtonPlacementMode="Compact"
+                                       ValueChanged="TransformBox_ValueChanged" />
+                            <NumberBox Grid.Row="1" Grid.Column="0"
+                                       x:Name="WidthBox"
+                                       Header="Width"
+                                       Minimum="1"
+                                       SpinButtonPlacementMode="Compact"
+                                       ValueChanged="TransformBox_ValueChanged" />
+                            <NumberBox Grid.Row="1" Grid.Column="1"
+                                       x:Name="HeightBox"
+                                       Header="Height"
+                                       Minimum="1"
+                                       SpinButtonPlacementMode="Compact"
+                                       ValueChanged="TransformBox_ValueChanged" />
+                            <NumberBox Grid.Row="2" Grid.Column="0"
+                                       x:Name="RotationBox"
+                                       Header="Rotation"
+                                       SmallChange="1"
+                                       SpinButtonPlacementMode="Compact"
+                                       ValueChanged="TransformBox_ValueChanged" />
+                            <NumberBox Grid.Row="2" Grid.Column="1"
+                                       x:Name="OpacityBox"
+                                       Header="Opacity %"
+                                       Minimum="0"
+                                       Maximum="100"
+                                       SmallChange="5"
+                                       SpinButtonPlacementMode="Compact"
+                                       ValueChanged="OpacityBox_ValueChanged" />
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="Show / Hide" Click="ToggleVisibility_Click" />
+                            <Button Content="Rotate -15°" Click="RotateLeft_Click" />
+                            <Button Content="Rotate +15°" Click="RotateRight_Click" />
+                        </StackPanel>
+
+                        <TextBlock Text="Tip: drag a raster layer directly on the canvas to move it."
+                                   FontSize="11"
+                                   Opacity="0.5"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </Grid>
 
@@ -128,7 +259,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="StatusText" Text="Ready" FontSize="12" Opacity="0.7" />
-            <TextBlock Grid.Column="1" Text="V0.1 · Normal blend renderer" FontSize="12" Opacity="0.45" />
+            <TextBlock Grid.Column="1" Text="V0.2 · Editable document core" FontSize="12" Opacity="0.45" />
         </Grid>
     </Grid>
 </Window>
